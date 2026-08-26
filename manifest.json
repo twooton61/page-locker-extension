@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "page-locker",
+  "description": "Toggle a navigation confirmation lock for the current page.",
+  "version": "0.1.0",
+  "icons": {
+    "16": "icons/page-16.png",
+    "32": "icons/page-32.png",
+    "48": "icons/page-48.png",
+    "128": "icons/page-128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/page-16.png",
+      "32": "icons/page-32.png",
+      "48": "icons/page-48.png",
+      "128": "icons/page-128.png"
+    },
+    "default_title": "Page Locker: click to lock this page"
+  }
+}
