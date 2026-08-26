@@ -8,10 +8,12 @@ lose by accident.
 ![page-locker locked page icon](icons/page-locked-128.png)
 
 Click the toolbar icon on a normal web page to toggle the lock for that loaded
-document. When locked, page-locker applies two cues:
+document. When locked, page-locker applies three cues:
 
 - **Navigation confirmation** - a standard `beforeunload` handler asks Chrome to
   show its built-in leave-page dialog before the document unloads.
+- **Title prefix** - a lock emoji is added to the page title so the tab is easy
+  to spot in the tab strip.
 - **Locked toolbar state** - the extension icon changes to the locked page icon,
   and the toolbar tooltip switches to the unlock action.
 
@@ -49,5 +51,5 @@ in-memory fallback for browsers that do not expose session storage.
 - `background.js` - service worker that toggles the active tab lock, updates the
   toolbar icon/title, and clears stale tab state after navigation or tab close.
 - `content.js` - idempotent page script that owns exactly one `beforeunload`
-  listener for the loaded document.
+  listener and title prefix for the loaded document.
 - `icons/` - unlocked and locked page icons used for the toolbar state.
