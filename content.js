@@ -1,11 +1,12 @@
 // Idempotent content script for page-locker.
-// It owns exactly one beforeunload listener for this loaded document.
+// It owns exactly one navigation lock for this loaded document.
 
 (() => {
   "use strict";
 
   const GLOBAL_KEY = "__pageLocker";
   const TITLE_PREFIX = "🔒 ";
+  const CONFIRM_MESSAGE = "This page is locked. Leave it?";
 
   if (globalThis[GLOBAL_KEY]) return;
 
@@ -13,9 +14,11 @@
   let lockedHref = "";
   let titleObserver = null;
   let applyingTitle = false;
+  let prefixedTitle = "";
+  let allowNavigationUntil = 0;
 
   function beforeUnload(event) {
-    if (!enabled) return undefined;
+    if (!enabled || canNavigate()) return undefined;
 
     event.preventDefault();
     event.returnValue = true;
@@ -30,12 +33,6 @@
     };
   }
 
-  function stripTitlePrefix(title) {
-    return title.startsWith(TITLE_PREFIX)
-      ? title.slice(TITLE_PREFIX.length)
-      : title;
-  }
-
   function setDocumentTitle(title) {
     applyingTitle = true;
     try {
@@ -48,17 +45,138 @@
   function applyLockedTitle() {
     if (!enabled || applyingTitle) return;
 
-    const nextTitle = `${TITLE_PREFIX}${stripTitlePrefix(document.title)}`;
-    if (document.title === nextTitle) return;
+    if (document.title.startsWith(TITLE_PREFIX)) {
+      if (document.title !== prefixedTitle) {
+        prefixedTitle = "";
+      }
+      return;
+    }
 
+    const nextTitle = `${TITLE_PREFIX}${document.title}`;
+    prefixedTitle = nextTitle;
     setDocumentTitle(nextTitle);
   }
 
   function clearLockedTitle() {
-    const nextTitle = stripTitlePrefix(document.title);
-    if (document.title === nextTitle) return;
+    if (prefixedTitle && document.title === prefixedTitle) {
+      setDocumentTitle(document.title.slice(TITLE_PREFIX.length));
+    }
 
-    setDocumentTitle(nextTitle);
+    prefixedTitle = "";
+  }
+
+  function onClick(event) {
+    if (!enabled || event.defaultPrevented || canNavigate()) return;
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    const link = closestLink(event.target);
+    if (!link || opensOutsideCurrentTab(link) || link.hasAttribute("download")) {
+      return;
+    }
+    if (!isLeavingLockedUrl(link.href)) return;
+
+    if (confirmNavigation()) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  function onTurboBeforeVisit(event) {
+    if (!enabled || canNavigate()) return;
+
+    const nextUrl = event.detail && event.detail.url;
+    if (!nextUrl || !isLeavingLockedUrl(nextUrl)) return;
+
+    if (confirmNavigation()) return;
+
+    event.preventDefault();
+  }
+
+  function confirmNavigation() {
+    if (!window.confirm(CONFIRM_MESSAGE)) return false;
+
+    allowNavigationUntil = Date.now() + 3000;
+    watchForUrlChange();
+    return true;
+  }
+
+  function canNavigate() {
+    return Date.now() < allowNavigationUntil;
+  }
+
+  function isLeavingLockedUrl(nextHref) {
+    try {
+      const current = comparableUrl(location.href);
+      const locked = comparableUrl(lockedHref || location.href);
+      const next = comparableUrl(nextHref);
+
+      return next !== current && next !== locked;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function comparableUrl(href) {
+    const url = new URL(href, location.href);
+    url.hash = "";
+    return url.href;
+  }
+
+  function closestLink(target) {
+    return target && typeof target.closest === "function"
+      ? target.closest("a[href]")
+      : null;
+  }
+
+  function opensOutsideCurrentTab(link) {
+    const target = link.getAttribute("target");
+    return Boolean(
+      target && !["_self", "_top"].includes(target.toLowerCase())
+    );
+  }
+
+  function watchForUrlChange() {
+    const startHref = location.href;
+    const deadline = Date.now() + 3000;
+
+    const check = () => {
+      if (!enabled) return;
+
+      if (location.href !== startHref) {
+        notifyUrlChanged();
+        return;
+      }
+
+      if (Date.now() < deadline) {
+        window.setTimeout(check, 100);
+      }
+    };
+
+    window.setTimeout(check, 100);
+  }
+
+  function notifyUrlChanged() {
+    try {
+      const sent = chrome.runtime.sendMessage({
+        source: "page-locker",
+        type: "url-changed",
+        href: location.href,
+      });
+
+      if (sent && typeof sent.catch === "function") {
+        sent.catch(() => {});
+      }
+    } catch (_) {
+      // Ignore: the background page may be unavailable during extension reloads.
+    }
   }
 
   function startTitleObserver() {
@@ -87,11 +205,17 @@
     lockedHref = enabled ? href || location.href : "";
 
     window.removeEventListener("beforeunload", beforeUnload);
+    document.removeEventListener("click", onClick, true);
+    document.removeEventListener("turbo:before-visit", onTurboBeforeVisit, true);
+
     if (enabled) {
       window.addEventListener("beforeunload", beforeUnload);
+      document.addEventListener("click", onClick, true);
+      document.addEventListener("turbo:before-visit", onTurboBeforeVisit, true);
       startTitleObserver();
       applyLockedTitle();
     } else {
+      allowNavigationUntil = 0;
       stopTitleObserver();
       clearLockedTitle();
     }

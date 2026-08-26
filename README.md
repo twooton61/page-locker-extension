@@ -1,24 +1,26 @@
 # page-locker
 
-A tiny Chrome (Manifest V3) extension that locks the current tab so Chrome asks
-for confirmation before you navigate away, reload, or close it - useful when a
-page has unsaved work, long-running state, or anything else you do not want to
-lose by accident.
+A tiny Chrome (Manifest V3) extension that locks selected URLs so Chrome asks for
+confirmation before you navigate away, reload, or close them - useful when a page
+has unsaved work, long-running state, or anything else you do not want to lose by
+accident.
 
 ![page-locker locked page icon](icons/page-locked-128.png)
 
-Click the toolbar icon on a normal web page to toggle the lock for that loaded
-document. When locked, page-locker applies three cues:
+Click the toolbar icon on a normal web page to toggle the lock for that exact
+URL. When locked, page-locker applies three cues:
 
 - **Navigation confirmation** - a standard `beforeunload` handler asks Chrome to
-  show its built-in leave-page dialog before the document unloads.
+  show its built-in leave-page dialog before the document unloads, and an
+  in-page guard catches app-level link navigation in single-page apps.
 - **Title prefix** - a lock emoji is added to the page title so the tab is easy
   to spot in the tab strip.
 - **Locked toolbar state** - the extension icon changes to the locked page icon,
   and the toolbar tooltip switches to the unlock action.
 
-The lock is scoped to the current loaded document. If you confirm navigation and
-a new page loads, the extension clears the tab state automatically.
+Locks are saved by exact URL. If you return to a locked URL later, page-locker
+reapplies the navigation confirmation and lock title automatically. Click the
+toolbar icon again on that URL to remove the saved lock.
 
 ## Zero dependencies
 
@@ -41,15 +43,16 @@ show the dialog after the page has received user interaction. Restricted pages
 such as `chrome://` pages cannot be locked because extensions cannot inject
 content scripts there.
 
-Locks are tracked per tab in `chrome.storage.session` when available, with an
-in-memory fallback for browsers that do not expose session storage.
+Locks are stored in `chrome.storage.local`, so they survive navigation and
+browser restarts. The extension requests host access for normal web pages so it
+can reapply a saved lock when a matching URL loads again.
 
 ## How it works
 
-- `manifest.json` - Manifest V3 metadata, toolbar action, icons, and minimal
-  permissions: `activeTab`, `scripting`, and `storage`.
-- `background.js` - service worker that toggles the active tab lock, updates the
-  toolbar icon/title, and clears stale tab state after navigation or tab close.
-- `content.js` - idempotent page script that owns exactly one `beforeunload`
-  listener and title prefix for the loaded document.
+- `manifest.json` - Manifest V3 metadata, toolbar action, icons, storage and
+  scripting permissions, and host access for normal web pages.
+- `background.js` - service worker that toggles saved URL locks, updates the
+  toolbar icon/title, and reapplies locks after navigation.
+- `content.js` - idempotent page script that owns the `beforeunload` listener,
+  in-page navigation guard, and title prefix for the loaded document.
 - `icons/` - unlocked and locked page icons used for the toolbar state.
