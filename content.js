@@ -14,7 +14,9 @@
   let lockedHref = "";
   let titleObserver = null;
   let applyingTitle = false;
-  let prefixedTitle = "";
+  let prefixedTitle = null;
+  let pageTitle = "";
+  let customTitle = "";
   let allowNavigationUntil = 0;
 
   function beforeUnload(event) {
@@ -30,6 +32,7 @@
       enabled,
       href: location.href,
       lockedHref,
+      customTitle,
     };
   }
 
@@ -45,24 +48,25 @@
   function applyLockedTitle() {
     if (!enabled || applyingTitle) return;
 
-    if (document.title.startsWith(TITLE_PREFIX)) {
-      if (document.title !== prefixedTitle) {
-        prefixedTitle = "";
-      }
-      return;
+    if (document.title !== prefixedTitle) {
+      pageTitle = document.title;
     }
 
-    const nextTitle = `${TITLE_PREFIX}${document.title}`;
+    const title = customTitle || pageTitle;
+    const nextTitle = title.startsWith(TITLE_PREFIX)
+      ? title
+      : `${TITLE_PREFIX}${title}`;
     prefixedTitle = nextTitle;
-    setDocumentTitle(nextTitle);
+    if (document.title !== nextTitle) setDocumentTitle(nextTitle);
   }
 
   function clearLockedTitle() {
-    if (prefixedTitle && document.title === prefixedTitle) {
-      setDocumentTitle(document.title.slice(TITLE_PREFIX.length));
+    if (prefixedTitle !== null && document.title === prefixedTitle) {
+      setDocumentTitle(pageTitle);
     }
 
-    prefixedTitle = "";
+    prefixedTitle = null;
+    customTitle = "";
   }
 
   function onClick(event) {
@@ -200,9 +204,10 @@
     titleObserver = null;
   }
 
-  function setLocked(nextEnabled, href) {
+  function setLocked(nextEnabled, href, title) {
     enabled = Boolean(nextEnabled);
     lockedHref = enabled ? href || location.href : "";
+    customTitle = enabled && typeof title === "string" ? title : "";
 
     window.removeEventListener("beforeunload", beforeUnload);
     document.removeEventListener("click", onClick, true);
@@ -232,7 +237,22 @@
     }
 
     if (message.type === "set-locked") {
-      sendResponse(setLocked(message.enabled, message.href));
+      sendResponse(setLocked(message.enabled, message.href, message.title));
+      return false;
+    }
+
+    if (message.type === "prompt-title") {
+      if (!enabled) {
+        window.alert("Lock this page with the toolbar icon before renaming it.");
+        sendResponse({ title: null });
+        return false;
+      }
+
+      const title = window.prompt(
+        "Rename locked page. Leave blank to restore the site's title:",
+        customTitle || pageTitle
+      );
+      sendResponse({ title: title === null ? null : title.trim() });
       return false;
     }
 

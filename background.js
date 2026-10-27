@@ -3,6 +3,7 @@
 // active URL.
 
 const LOCKS_KEY = "pageLockerUrlLocks";
+const RENAME_MENU_ID = "page-locker-rename";
 const TITLE_UNLOCK = "Page Locker: locked URL - click to unlock";
 const TITLE_LOCK = "Page Locker: click to lock this URL";
 const TITLE_UNAVAILABLE = "Page Locker: cannot lock this page";
@@ -22,6 +23,11 @@ const LOCKED_ICONS = {
 let memoryLocks = {};
 
 chrome.runtime.onInstalled.addListener(async () => {
+  chrome.contextMenus.create({
+    id: RENAME_MENU_ID,
+    title: "Rename locked page…",
+    contexts: ["action"],
+  });
   await renderDefaultAction();
   await syncActiveTab();
 });
@@ -57,6 +63,39 @@ chrome.action.onClicked.addListener(async (tab) => {
   } catch (error) {
     console.warn("page-locker: unable to toggle lock", error);
     await renderUnavailable(tab.id);
+  }
+});
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== RENAME_MENU_ID || !Number.isInteger(tab?.id)) return;
+
+  try {
+    await reconcileTab(tab.id);
+    const state = await getPageState(tab.id);
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      source: "page-locker",
+      type: "prompt-title",
+    });
+    if (!state.enabled || typeof response?.title !== "string") return;
+
+    const currentState = await getPageState(tab.id);
+    if (!currentState.enabled || currentState.href !== state.href) return;
+
+    const locks = await readLocks();
+    if (!locks[state.href]) return;
+
+    locks[state.href] = { ...locks[state.href], title: response.title };
+    await writeLocks(locks);
+    await setPageLocked(tab.id, true, state.href, response.title);
+
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(
+      tabs
+        .filter((other) => other.id !== tab.id && other.url === state.href)
+        .map((other) => reconcileTab(other.id))
+    );
+  } catch (error) {
+    console.warn("page-locker: unable to rename locked page", error);
   }
 });
 
@@ -103,12 +142,13 @@ async function getPageState(tabId) {
   });
 }
 
-async function setPageLocked(tabId, enabled, href) {
+async function setPageLocked(tabId, enabled, href, title = "") {
   return await chrome.tabs.sendMessage(tabId, {
     source: "page-locker",
     type: "set-locked",
     enabled,
     href,
+    title,
   });
 }
 
@@ -123,11 +163,17 @@ async function reconcileTab(tabId) {
     await ensureContentScript(tabId);
     const state = await getPageState(tabId);
     const href = state.href || "";
-    const shouldLock = Boolean(href && (await readLock(href)));
+    const lock = href ? await readLock(href) : null;
+    const shouldLock = Boolean(lock);
     const lockedHref = shouldLock ? href : "";
+    const title = typeof lock?.title === "string" ? lock.title : "";
 
-    if (state.enabled !== shouldLock || state.lockedHref !== lockedHref) {
-      await setPageLocked(tabId, shouldLock, href);
+    if (
+      state.enabled !== shouldLock ||
+      state.lockedHref !== lockedHref ||
+      state.customTitle !== title
+    ) {
+      await setPageLocked(tabId, shouldLock, href, title);
     }
 
     await renderAction(tabId, shouldLock);
