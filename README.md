@@ -50,7 +50,9 @@ content scripts there.
 
 Locks are stored in `chrome.storage.local`, so they survive navigation and
 browser restarts. The extension requests host access for normal web pages so it
-can reapply a saved lock when a matching URL loads again.
+can reapply a saved lock when a matching URL loads again. On browser startup,
+page-locker checks open tabs and re-arms any restored tab whose exact URL is
+locked.
 
 ## How it works
 

@@ -29,12 +29,12 @@ chrome.runtime.onInstalled.addListener(async () => {
     contexts: ["action"],
   });
   await renderDefaultAction();
-  await syncActiveTab();
+  await syncOpenTabs();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await renderDefaultAction();
-  await syncActiveTab();
+  await syncOpenTabs();
 });
 
 chrome.action.onClicked.addListener(async (tab) => {
@@ -153,9 +153,15 @@ async function setPageLocked(tabId, enabled, href, title = "") {
 }
 
 async function reconcileTab(tabId) {
-  const tabHref = await getTabHref(tabId);
+  const tab = await getTab(tabId);
+  const tabHref = tab ? tab.url || tab.pendingUrl || "" : "";
   if (tabHref && !canInjectContentScript(tabHref)) {
     await renderUnavailable(tabId);
+    return;
+  }
+
+  if (tab && tab.discarded) {
+    await renderAction(tabId, Boolean(tabHref && (await readLock(tabHref))));
     return;
   }
 
@@ -193,27 +199,33 @@ async function syncActionFromUrl(tabId, href) {
   await renderAction(tabId, Boolean(lock));
 }
 
-async function syncActiveTab() {
+async function syncOpenTabs() {
   try {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
+    const locks = await readLocks();
+    const tabs = await chrome.tabs.query({});
 
-    if (tab && Number.isInteger(tab.id)) {
-      await reconcileTab(tab.id);
+    for (const tab of tabs) {
+      if (!Number.isInteger(tab.id)) continue;
+
+      const href = tab.url || tab.pendingUrl || "";
+      if (href && locks[href]) {
+        await reconcileTab(tab.id);
+      } else if (href && !canInjectContentScript(href)) {
+        await renderUnavailable(tab.id);
+      } else {
+        await renderAction(tab.id, false);
+      }
     }
   } catch (error) {
-    console.warn("page-locker: unable to sync active tab", error);
+    console.warn("page-locker: unable to sync open tabs", error);
   }
 }
 
-async function getTabHref(tabId) {
+async function getTab(tabId) {
   try {
-    const tab = await chrome.tabs.get(tabId);
-    return tab.url || "";
+    return await chrome.tabs.get(tabId);
   } catch (_) {
-    return "";
+    return null;
   }
 }
 
