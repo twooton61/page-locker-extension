@@ -60,6 +60,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     }
 
     await renderAction(tab.id, nextState.enabled);
+    if (nextState.enabled) await promptForLockedTitle(tab.id);
   } catch (error) {
     console.warn("page-locker: unable to toggle lock", error);
     await renderUnavailable(tab.id);
@@ -69,16 +70,20 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== RENAME_MENU_ID || !Number.isInteger(tab?.id)) return;
 
+  await promptForLockedTitle(tab.id);
+});
+
+async function promptForLockedTitle(tabId) {
   try {
-    await reconcileTab(tab.id);
-    const state = await getPageState(tab.id);
-    const response = await chrome.tabs.sendMessage(tab.id, {
+    await reconcileTab(tabId);
+    const state = await getPageState(tabId);
+    const response = await chrome.tabs.sendMessage(tabId, {
       source: "page-locker",
       type: "prompt-title",
     });
     if (!state.enabled || typeof response?.title !== "string") return;
 
-    const currentState = await getPageState(tab.id);
+    const currentState = await getPageState(tabId);
     if (!currentState.enabled || currentState.href !== state.href) return;
 
     const locks = await readLocks();
@@ -86,18 +91,18 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     locks[state.href] = { ...locks[state.href], title: response.title };
     await writeLocks(locks);
-    await setPageLocked(tab.id, true, state.href, response.title);
+    await setPageLocked(tabId, true, state.href, response.title);
 
     const tabs = await chrome.tabs.query({});
     await Promise.all(
       tabs
-        .filter((other) => other.id !== tab.id && other.url === state.href)
+        .filter((other) => other.id !== tabId && other.url === state.href)
         .map((other) => reconcileTab(other.id))
     );
   } catch (error) {
     console.warn("page-locker: unable to rename locked page", error);
   }
-});
+}
 
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (

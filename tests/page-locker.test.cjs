@@ -24,7 +24,7 @@ function createPage(href, initialTitle) {
   const observers = new Set();
   const listeners = new Map();
   const messages = [];
-  const page = { nextTitle: null, alerts: [] };
+  const page = { nextTitle: null, alerts: [], promptCount: 0 };
   const document = {
     head: {},
     get title() { return title; },
@@ -41,6 +41,7 @@ function createPage(href, initialTitle) {
       addEventListener(name, listener) { listeners.set(name, listener); },
       removeEventListener(name) { listeners.delete(name); },
       prompt(_message, defaultTitle) {
+        page.promptCount++;
         page.promptDefault = defaultTitle;
         return page.nextTitle;
       },
@@ -132,6 +133,36 @@ function createExtension(savedLocks = {}) {
   };
 }
 
+test("locking prompts for a title and saves it for matching tabs", async () => {
+  const extension = createExtension();
+  const page = extension.page();
+  const duplicate = extension.page(2, "Another copy");
+  page.nextTitle = "  Project dashboard  ";
+  await extension.toggle();
+  assert.equal(page.promptCount, 1);
+  assert.equal(page.promptDefault, "Work");
+  assert.equal(page.document.title, "🔒 Project dashboard");
+  assert.equal(duplicate.document.title, "🔒 Project dashboard");
+  assert.equal(extension.storage[LOCKS_KEY][HREF].title, "Project dashboard");
+  assert.equal(page.listeners.has("beforeunload"), true);
+
+  await extension.toggle();
+  assert.equal(page.promptCount, 1, "unlocking must not prompt");
+});
+
+for (const title of [null, "   "]) {
+  test(`locking keeps the original title when the prompt returns ${JSON.stringify(title)}`, async () => {
+    const extension = createExtension();
+    const page = extension.page();
+    page.nextTitle = title;
+    await extension.toggle();
+    assert.equal(page.promptCount, 1);
+    assert.equal(page.document.title, "🔒 Work");
+    assert.ok(extension.storage[LOCKS_KEY][HREF]);
+    assert.equal(page.listeners.has("beforeunload"), true);
+  });
+}
+
 test("the toolbar menu renames a locked URL and updates matching tabs", async () => {
   const extension = createExtension();
   const page = extension.page();
@@ -162,12 +193,14 @@ test("saved names survive a page reload and service worker restart", async () =>
   await extension.chrome.tabs.onUpdated.emit(1, { status: "complete" });
   reloaded.flushTitles();
   assert.equal(reloaded.document.title, "🔒 My work");
+  assert.equal(reloaded.promptCount, 0);
 
   const restarted = createExtension(extension.storage[LOCKS_KEY]);
   const restored = restarted.page(1, "Fresh site title");
   await restarted.chrome.runtime.onStartup.emit();
   restored.flushTitles();
   assert.equal(restored.document.title, "🔒 My work");
+  assert.equal(restored.promptCount, 0);
 });
 
 test("clearing a name restores the latest site title and keeps the lock", async () => {
@@ -195,6 +228,7 @@ test("unlocking restores the site title and forgets the custom name", async () =
   assert.equal(page.document.title, "Latest site title");
   assert.equal(page.listeners.has("beforeunload"), false);
   assert.equal(extension.storage[LOCKS_KEY][HREF], undefined);
+  page.nextTitle = null;
   await extension.toggle();
   page.flushTitles();
   assert.equal(page.document.title, "🔒 Latest site title");

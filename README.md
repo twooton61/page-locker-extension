@@ -22,10 +22,12 @@ Locks are saved by exact URL. If you return to a locked URL later, page-locker
 reapplies the navigation confirmation and lock title automatically. Click the
 toolbar icon again on that URL to remove the saved lock.
 
-To rename a locked page's tab, right-click the toolbar icon and choose **Rename
-locked page…**. The custom title is saved with the URL's lock and survives reloads
-and browser restarts. Leave the name blank to restore the site's title. Unlocking
-the URL also restores the site's title and removes the saved name.
+When you first lock a page, a prompt lets you rename its tab. Cancel or leave the
+name blank to keep the site's title. To rename it later, right-click the toolbar
+icon and choose **Rename locked page…**. The custom title is saved with the URL's
+lock and survives reloads and browser restarts. Leave the name blank to restore
+the site's title. Unlocking the URL also restores the site's title and removes
+the saved name.
 
 ## Zero dependencies
 
